@@ -52,11 +52,8 @@ export class PricingService {
         tenantId,
         productId,
         active: true,
-        OR: [
-          { validFrom: null },
-          { validFrom: { lte: now } }
-        ],
         AND: [
+          { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
           { OR: [{ validTo: null }, { validTo: { gte: now } }] }
         ]
       },

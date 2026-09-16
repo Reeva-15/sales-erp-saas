@@ -553,6 +553,71 @@ router.post('/pricing-rules', async (req: AuthRequest, res) => {
   }
 });
 
+router.put('/pricing-rules/:id', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { priority, ruleType, customerId, customerGroupId, priceListId, productId, minQty, maxQty, rate, discountPercent, active } = req.body;
+    
+    const existing = await prisma.pricingRule.findFirst({
+      where: { id, tenantId: req.tenantId! }
+    });
+    if (!existing) throw new Error('Pricing rule not found.');
+
+    const rule = await prisma.pricingRule.update({
+      where: { id },
+      data: {
+        priority: priority !== undefined ? Number(priority) : existing.priority,
+        ruleType: ruleType || existing.ruleType,
+        customerId: customerId !== undefined ? (customerId || null) : existing.customerId,
+        customerGroupId: customerGroupId !== undefined ? (customerGroupId || null) : existing.customerGroupId,
+        priceListId: priceListId !== undefined ? (priceListId || null) : existing.priceListId,
+        productId: productId || existing.productId,
+        minQty: minQty !== undefined ? Number(minQty) : existing.minQty,
+        maxQty: maxQty !== undefined ? (maxQty ? Number(maxQty) : null) : existing.maxQty,
+        rate: rate !== undefined ? Number(rate) : existing.rate,
+        discountPercent: discountPercent !== undefined ? Number(discountPercent) : existing.discountPercent,
+        active: active !== undefined ? Boolean(active) : existing.active
+      }
+    });
+    res.json({ success: true, data: rule });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+router.delete('/pricing-rules/:id', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.pricingRule.findFirst({
+      where: { id, tenantId: req.tenantId! }
+    });
+    if (!existing) throw new Error('Pricing rule not found.');
+
+    await prisma.pricingRule.delete({ where: { id } });
+    res.json({ success: true, message: 'Pricing rule deleted successfully.' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+router.patch('/pricing-rules/:id/status', async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.pricingRule.findFirst({
+      where: { id, tenantId: req.tenantId! }
+    });
+    if (!existing) throw new Error('Pricing rule not found.');
+
+    const rule = await prisma.pricingRule.update({
+      where: { id },
+      data: { active: !existing.active }
+    });
+    res.json({ success: true, data: rule });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 router.post('/pricing/calculate', async (req: AuthRequest, res) => {
   try {
     const { customerId, productId, quantity, priceListId } = req.body;

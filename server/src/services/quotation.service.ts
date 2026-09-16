@@ -73,7 +73,9 @@ export class QuotationService {
       });
 
       const rate = priceResult.appliedRate;
-      const userDiscountPercent = item.discountPercent ?? priceResult.discountPercent;
+      const userDiscountPercent = (item.discountPercent !== undefined && item.discountPercent !== null && Number(item.discountPercent) > 0)
+        ? Number(item.discountPercent)
+        : priceResult.discountPercent;
       const itemSubtotal = rate * item.quantity;
       const itemDiscountAmount = (itemSubtotal * userDiscountPercent) / 100;
       const taxableAmount = itemSubtotal - itemDiscountAmount;
