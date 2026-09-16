@@ -1,0 +1,778 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -----------------------------------------------------------------------------
+// 1. Core / SaaS / Multi-Tenancy Architecture
+// -----------------------------------------------------------------------------
+
+model Tenant {
+  id              String         @id @default(uuid())
+  code            String         @unique
+  name            String
+  contactPerson   String?
+  email           String
+  mobile          String?
+  address         String?
+  country         String         @default("India")
+  state           String?
+  city            String?
+  gstin           String?
+  logo            String?
+  status          String         @default("ACTIVE") // ACTIVE, TRIAL, EXPIRED, SUSPENDED, INACTIVE
+  trialStartDate  DateTime?
+  trialEndDate    DateTime?
+  planId          String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  companies       Company[]
+  branches        Branch[]
+  departments     Department[]
+  users           User[]
+  roles           Role[]
+  tenantFeatures  TenantFeature[]
+  customers       Customer[]
+  products        Product[]
+  salespersons    Salesperson[]
+  enquiries       Enquiry[]
+  quotations      Quotation[]
+  salesOrders     SalesOrder[]
+  invoices        Invoice[]
+  payments        Payment[]
+  customFields    CustomField[]
+  pricingRules    PricingRule[]
+  priceLists      PriceList[]
+  approvalRules   ApprovalRule[]
+  workflowRules   WorkflowRule[]
+  auditLogs       AuditLog[]
+}
+
+model Company {
+  id          String       @id @default(uuid())
+  tenantId    String
+  code        String
+  name        String
+  address     String?
+  city        String?
+  state       String?
+  country     String       @default("India")
+  gstin       String?
+  logo        String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branches    Branch[]
+  departments Department[]
+  users       User[]
+
+  @@unique([tenantId, code])
+}
+
+model Branch {
+  id          String     @id @default(uuid())
+  tenantId    String
+  companyId   String
+  code        String
+  name        String
+  address     String?
+  city        String?
+  state       String?
+  country     String     @default("India")
+  gstin       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users       User[]
+
+  @@unique([companyId, code])
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  tenantId    String
+  companyId   String
+  code        String
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users       User[]
+
+  @@unique([companyId, code])
+}
+
+model Feature {
+  id          String          @id @default(uuid())
+  code        String          @unique
+  name        String
+  description String?
+  category    String          @default("SALES")
+  tenantLinks TenantFeature[]
+}
+
+model TenantFeature {
+  id           String   @id @default(uuid())
+  tenantId     String
+  featureCode  String
+  isEnabled    Boolean  @default(true)
+  configuredAt DateTime @default(now())
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  feature      Feature  @relation(fields: [featureCode], references: [code], onDelete: Cascade)
+
+  @@unique([tenantId, featureCode])
+}
+
+model SubscriptionPlan {
+  id               String   @id @default(uuid())
+  name             String
+  code             String   @unique
+  price            Float    @default(0)
+  maxUsers         Int      @default(10)
+  maxInvoicesMonth Int      @default(1000)
+  featuresJson     String   @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// -----------------------------------------------------------------------------
+// 2. User, Role & Scope-Based Permission System
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String      @id @default(uuid())
+  tenantId      String?     // Null for SaaS Main Admin
+  companyId     String?
+  branchId      String?
+  departmentId  String?
+  managerId     String?
+  employeeCode  String?
+  name          String
+  email         String      @unique
+  mobile        String?
+  username      String      @unique
+  passwordHash  String
+  roleId        String?
+  isMainAdmin   Boolean     @default(false)
+  status        String      @default("ACTIVE") // ACTIVE, INACTIVE, SUSPENDED
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  tenant        Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company       Company?    @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  branch        Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  department    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  manager       User?       @relation("UserManagement", fields: [managerId], references: [id], onDelete: SetNull)
+  subordinates  User[]      @relation("UserManagement")
+  role          Role?       @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  
+  quotationsCreated Quotation[] @relation("QuotationCreator")
+  salesOrdersCreated SalesOrder[] @relation("SalesOrderCreator")
+  invoicesCreated Invoice[] @relation("InvoiceCreator")
+  paymentsCreated Payment[] @relation("PaymentCreator")
+  salespersons    Salesperson[]
+  approvalHistories ApprovalHistory[]
+  auditLogs     AuditLog[]
+}
+
+model Role {
+  id           String           @id @default(uuid())
+  tenantId     String?          // Null for global default roles
+  code         String
+  name         String
+  description  String?
+  isSystemRole Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  tenant       Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users        User[]
+  permissions  RolePermission[]
+
+  @@unique([tenantId, code])
+}
+
+model Permission {
+  id        String           @id @default(uuid())
+  module    String           // CUSTOMER, PRODUCT, ENQUIRY, QUOTATION, SALES_ORDER, INVOICE, PAYMENT, REPORT, USER, ROLE, CONFIG
+  action    String           // VIEW, CREATE, EDIT, DELETE, APPROVE, REJECT, CANCEL, EXPORT, PRINT, IMPORT
+  name      String
+
+  roles     RolePermission[]
+
+  @@unique([module, action])
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  scope        String     @default("COMPANY") // OWN, TEAM, DEPARTMENT, BRANCH, COMPANY, TENANT
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+// -----------------------------------------------------------------------------
+// 3. Masters (Customer, Product, Salesperson, Taxes, Pricing)
+// -----------------------------------------------------------------------------
+
+model CustomerGroup {
+  id             String     @id @default(uuid())
+  tenantId       String
+  code           String
+  name           String
+  discountPercent Float     @default(0)
+
+  customers      Customer[]
+  pricingRules   PricingRule[]
+
+  @@unique([tenantId, code])
+}
+
+model Customer {
+  id              String         @id @default(uuid())
+  tenantId        String
+  companyId       String?
+  branchId        String?
+  customerCode    String
+  customerName    String
+  customerType    String         @default("BUSINESS") // BUSINESS, INDIVIDUAL
+  contactPerson   String?
+  mobile          String?
+  email           String?
+  gstin           String?
+  pan             String?
+  address         String?
+  city            String?
+  state           String?
+  country         String         @default("India")
+  territory       String?
+  salespersonId   String?
+  customerGroupId String?
+  priceListId     String?
+  paymentTerms    String?        @default("Net 30")
+  creditLimit     Float          @default(0)
+  status          String         @default("ACTIVE")
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerGroup   CustomerGroup? @relation(fields: [customerGroupId], references: [id], onDelete: SetNull)
+  salesperson     Salesperson?   @relation(fields: [salespersonId], references: [id], onDelete: SetNull)
+  priceList       PriceList?     @relation(fields: [priceListId], references: [id], onDelete: SetNull)
+
+  enquiries       Enquiry[]
+  quotations      Quotation[]
+  salesOrders     SalesOrder[]
+  invoices        Invoice[]
+  payments        Payment[]
+  pricingRules    PricingRule[]
+
+  @@unique([tenantId, customerCode])
+}
+
+model ProductGroup {
+  id       String    @id @default(uuid())
+  tenantId String
+  code     String
+  name     String
+
+  products Product[]
+
+  @@unique([tenantId, code])
+}
+
+model Unit {
+  id       String    @id @default(uuid())
+  tenantId String
+  code     String
+  name     String
+
+  products Product[]
+
+  @@unique([tenantId, code])
+}
+
+model Tax {
+  id          String    @id @default(uuid())
+  tenantId    String
+  name        String
+  ratePercent Float
+  hsnSac      String?
+  taxType     String    @default("GST") // GST, IGST, CGST_SGST
+  isEffective Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  products    Product[]
+}
+
+model Salesperson {
+  id                String       @id @default(uuid())
+  tenantId          String
+  companyId         String?
+  branchId          String?
+  userId            String?
+  code              String
+  name              String
+  email             String?
+  mobile            String?
+  commissionPercent Float        @default(0)
+  status            String       @default("ACTIVE")
+  category          String?      @default("Sales Manager")
+  permissions       String?      @default("DASHBOARD,CUSTOMER,ENQUIRY,QUOTATION,SALES_ORDER,INVOICE,PAYMENT")
+  createdAt         DateTime     @default(now())
+
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user              User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  customers         Customer[]
+  enquiries         Enquiry[]
+  quotations        Quotation[]
+  salesOrders       SalesOrder[]
+
+  @@unique([tenantId, code])
+}
+
+model Product {
+  id             String        @id @default(uuid())
+  tenantId       String
+  companyId      String?
+  productCode    String
+  sku            String
+  name           String
+  productGroupId String?
+  category       String?
+  description    String?
+  unitId         String?
+  sellingPrice   Float
+  costPrice      Float         @default(0)
+  taxId          String?
+  hsnSac         String?
+  barcode        String?
+  minimumStock   Int           @default(0)
+  status         String        @default("ACTIVE")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productGroup   ProductGroup? @relation(fields: [productGroupId], references: [id], onDelete: SetNull)
+  unit           Unit?         @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  tax            Tax?          @relation(fields: [taxId], references: [id], onDelete: SetNull)
+
+  enquiryItems    EnquiryItem[]
+  quotationItems  QuotationItem[]
+  salesOrderItems SalesOrderItem[]
+  invoiceItems    InvoiceItem[]
+  pricingRules    PricingRule[]
+
+  @@unique([tenantId, productCode])
+}
+
+model PriceList {
+  id        String        @id @default(uuid())
+  tenantId  String
+  code      String
+  name      String
+  currency  String        @default("INR")
+  isDefault Boolean       @default(false)
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customers Customer[]
+  pricingRules PricingRule[]
+
+  @@unique([tenantId, code])
+}
+
+model PricingRule {
+  id              String         @id @default(uuid())
+  tenantId        String
+  priority        Int            @default(1) // Priority 1: Special Customer, 2: Customer Group, 3: Qty, 4: Price List, 5: Standard
+  ruleType        String         // SPECIAL_CUSTOMER, CUSTOMER_GROUP, QUANTITY_TIER, PRICE_LIST, STANDARD
+  customerId      String?
+  customerGroupId String?
+  priceListId     String?
+  productId       String
+  minQty          Float          @default(1)
+  maxQty          Float?
+  rate            Float
+  discountPercent Float          @default(0)
+  validFrom       DateTime?
+  validTo         DateTime?
+  active          Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer        Customer?      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerGroup   CustomerGroup? @relation(fields: [customerGroupId], references: [id], onDelete: Cascade)
+  priceList       PriceList?     @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  product         Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// 4. Sales Pipeline (Enquiry -> Quotation -> Approval -> Order -> Invoice -> Payment)
+// -----------------------------------------------------------------------------
+
+model Enquiry {
+  id                   String        @id @default(uuid())
+  tenantId             String
+  companyId            String?
+  branchId             String?
+  enquiryNumber        String
+  enquiryDate          DateTime      @default(now())
+  customerId           String
+  contactPerson        String?
+  contactDetails       String?
+  salespersonId        String?
+  source               String?
+  expectedValue        Float         @default(0)
+  expectedClosingDate  DateTime?
+  expectedDeliveryDate DateTime?
+  notes                String?
+  status               String        @default("OPEN") // DRAFT, OPEN, ASSIGNED, IN_PROGRESS, QUOTED, WON, LOST, CANCELLED
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  tenant               Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer             Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  salesperson          Salesperson?  @relation(fields: [salespersonId], references: [id], onDelete: SetNull)
+  items                EnquiryItem[]
+
+  @@unique([tenantId, enquiryNumber])
+}
+
+model EnquiryItem {
+  id               String   @id @default(uuid())
+  enquiryId        String
+  productId        String
+  description      String?
+  quantity         Float
+  unitId           String?
+  expectedPrice    Float?
+  requirementNotes String?
+  status           String   @default("OPEN")
+
+  enquiry          Enquiry  @relation(fields: [enquiryId], references: [id], onDelete: Cascade)
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Quotation {
+  id              String          @id @default(uuid())
+  tenantId        String
+  companyId       String?
+  branchId        String?
+  quotationNumber String
+  quotationDate   DateTime        @default(now())
+  validUntil      DateTime
+  customerId      String
+  contactPerson   String?
+  salespersonId   String?
+  priceListId     String?
+  paymentTerms    String?
+  deliveryTerms   String?
+  currency        String          @default("INR")
+  notes           String?
+  subtotal        Float           @default(0)
+  discountTotal   Float           @default(0)
+  taxTotal        Float           @default(0)
+  roundOff        Float           @default(0)
+  grandTotal      Float           @default(0)
+  status          String          @default("DRAFT") // DRAFT, SUBMITTED, PENDING_APPROVAL, APPROVED, REJECTED, SENT, ACCEPTED, EXPIRED, CANCELLED
+  createdById     String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  salesperson     Salesperson?    @relation(fields: [salespersonId], references: [id], onDelete: SetNull)
+  createdBy       User?           @relation("QuotationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  items           QuotationItem[]
+  salesOrders     SalesOrder[]
+
+  @@unique([tenantId, quotationNumber])
+}
+
+model QuotationItem {
+  id              String    @id @default(uuid())
+  quotationId     String
+  productId       String
+  description     String?
+  quantity        Float
+  unitId          String?
+  rate            Float
+  discountPercent Float     @default(0)
+  discountAmount  Float     @default(0)
+  taxPercent      Float     @default(0)
+  taxAmount       Float     @default(0)
+  lineTotal       Float
+
+  quotation       Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product         Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model ApprovalRule {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  name               String
+  minDiscountPercent Float    @default(0)
+  maxDiscountPercent Float    @default(100)
+  minAmount          Float    @default(0)
+  maxAmount          Float?
+  approverRoleCode   String?
+  autoApprove        Boolean  @default(false)
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model ApprovalHistory {
+  id             String   @id @default(uuid())
+  tenantId       String
+  documentType   String   // QUOTATION, SALES_ORDER
+  documentId     String
+  approverUserId String?
+  action         String   // SUBMITTED, APPROVED, REJECTED, SENT_BACK
+  comment        String?
+  previousStatus String?
+  newStatus      String
+  createdAt      DateTime @default(now())
+
+  approver       User?    @relation(fields: [approverUserId], references: [id], onDelete: SetNull)
+}
+
+model SalesOrder {
+  id             String           @id @default(uuid())
+  tenantId       String
+  companyId      String?
+  branchId       String?
+  orderNumber    String
+  orderDate      DateTime         @default(now())
+  quotationId    String?
+  customerId     String
+  salespersonId  String?
+  deliveryDate   DateTime?
+  paymentTerms   String?
+  deliveryTerms  String?
+  notes          String?
+  subtotal       Float            @default(0)
+  discountTotal  Float            @default(0)
+  taxTotal       Float            @default(0)
+  roundOff       Float            @default(0)
+  grandTotal     Float            @default(0)
+  status         String           @default("CONFIRMED") // DRAFT, CONFIRMED, PROCESSING, PARTIALLY_DELIVERED, COMPLETED, CANCELLED
+  createdById    String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  quotation      Quotation?       @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  customer       Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  salesperson    Salesperson?     @relation(fields: [salespersonId], references: [id], onDelete: SetNull)
+  createdBy      User?            @relation("SalesOrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  items          SalesOrderItem[]
+  invoices       Invoice[]
+
+  @@unique([tenantId, orderNumber])
+}
+
+model SalesOrderItem {
+  id              String     @id @default(uuid())
+  salesOrderId    String
+  productId       String
+  description     String?
+  quantity        Float
+  unitId          String?
+  rate            Float
+  discountPercent Float      @default(0)
+  discountAmount  Float      @default(0)
+  taxPercent      Float      @default(0)
+  taxAmount       Float      @default(0)
+  lineTotal       Float
+
+  salesOrder      SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  product         Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id             String        @id @default(uuid())
+  tenantId       String
+  companyId      String?
+  branchId       String?
+  invoiceNumber  String
+  invoiceDate    DateTime      @default(now())
+  salesOrderId   String?
+  customerId     String
+  customerGstin  String?
+  billingAddress String?
+  shippingAddress String?
+  paymentTerms   String?
+  notes          String?
+  subtotal       Float         @default(0)
+  discountTotal  Float         @default(0)
+  cgstTotal      Float         @default(0)
+  sgstTotal      Float         @default(0)
+  igstTotal      Float         @default(0)
+  taxTotal       Float         @default(0)
+  roundOff       Float         @default(0)
+  grandTotal     Float         @default(0)
+  paidAmount     Float         @default(0)
+  balanceAmount  Float         @default(0)
+  status         String        @default("POSTED") // DRAFT, POSTED, PARTIALLY_PAID, PAID, OVERDUE, CANCELLED
+  createdById    String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  salesOrder     SalesOrder?   @relation(fields: [salesOrderId], references: [id], onDelete: SetNull)
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy      User?         @relation("InvoiceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  items          InvoiceItem[]
+  allocations    PaymentAllocation[]
+
+  @@unique([tenantId, invoiceNumber])
+}
+
+model InvoiceItem {
+  id              String   @id @default(uuid())
+  invoiceId       String
+  productId       String
+  description     String?
+  quantity        Float
+  unitId          String?
+  rate            Float
+  discountPercent Float    @default(0)
+  taxPercent      Float    @default(0)
+  cgstAmount      Float    @default(0)
+  sgstAmount      Float    @default(0)
+  igstAmount      Float    @default(0)
+  lineTotal       Float
+
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id              String              @id @default(uuid())
+  tenantId        String
+  companyId       String?
+  branchId        String?
+  paymentNumber   String
+  paymentDate     DateTime            @default(now())
+  customerId      String
+  amount          Float
+  paymentMode     String              @default("BANK") // CASH, BANK, UPI, CHEQUE, OTHER
+  referenceNumber String?
+  bankAccount     String?
+  notes           String?
+  status          String              @default("POSTED") // POSTED, CANCELLED
+  createdById     String?
+  createdAt       DateTime            @default(now())
+
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer        Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy       User?               @relation("PaymentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  allocations     PaymentAllocation[]
+
+  @@unique([tenantId, paymentNumber])
+}
+
+model PaymentAllocation {
+  id          String   @id @default(uuid())
+  paymentId   String
+  invoiceId   String
+  amount      Float
+  allocatedAt DateTime @default(now())
+
+  payment     Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+// -----------------------------------------------------------------------------
+// 5. Dynamic Engine (Custom Fields, Workflows & Audit Logs)
+// -----------------------------------------------------------------------------
+
+model CustomField {
+  id           String             @id @default(uuid())
+  tenantId     String
+  module       String             // CUSTOMER, PRODUCT, ENQUIRY, QUOTATION, SALES_ORDER, INVOICE
+  entityName   String             @default("default")
+  fieldName    String
+  fieldLabel   String
+  fieldType    String             // TEXT, NUMBER, DECIMAL, DATE, DROPDOWN, MULTI_SELECT, CHECKBOX, FILE, CUSTOMER_SELECTOR, PRODUCT_SELECTOR, USER_SELECTOR
+  optionsJson  String             @default("[]")
+  isRequired   Boolean            @default(false)
+  defaultValue String?
+  displayOrder Int                @default(1)
+  active       Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  values       CustomFieldValue[]
+
+  @@unique([tenantId, module, fieldName])
+}
+
+model CustomFieldValue {
+  id            String      @id @default(uuid())
+  tenantId      String
+  customFieldId String
+  recordId      String
+  valueJson     String
+  updatedAt     DateTime    @updatedAt
+
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  @@unique([customFieldId, recordId])
+}
+
+model WorkflowRule {
+  id            String   @id @default(uuid())
+  tenantId      String
+  module        String
+  conditionJson String   // e.g. {"field": "discount", "operator": ">", "value": 5}
+  actionType    String   // APPROVAL, REJECT, NOTIFICATION, STATUS_CHANGE, ASSIGN_USER
+  nextStatus    String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  tenantId     String?
+  companyId    String?
+  userId       String?
+  module       String
+  action       String   // LOGIN, LOGOUT, CREATE, EDIT, DELETE, APPROVE, REJECT, CANCEL, EXPORT, PERMISSION_CHANGE, PRICING_CHANGE
+  recordId     String?
+  oldValueJson String?
+  newValueJson String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
